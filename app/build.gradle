@@ -1,0 +1,70 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.jiye.watchalert'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.jiye.watchalert"
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName "1.0"
+        ndk {
+            // 파이썬 네이티브 라이브러리(pandas/numpy)를 담는 대상.
+            // 요즘 태블릿은 arm64-v8a. 아주 오래된 기기를 위해 32비트도 함께 넣는다.
+            abiFilters "arm64-v8a", "armeabi-v7a"
+        }
+    }
+
+    signingConfigs {
+        appkey {
+            storeFile file("../keystore/app.jks")
+            storePassword "watchalert"
+            keyAlias "watchalert"
+            keyPassword "watchalert"
+        }
+    }
+
+    buildTypes {
+        debug   { signingConfig signingConfigs.appkey }
+        release {
+            signingConfig signingConfigs.appkey
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    // 린트 경고(힌트에 autofill 없음 같은 것) 때문에 릴리스 빌드가 멈추지 않게 한다.
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        pip {
+            // 이 둘만 있으면 된다. yfinance 는 쓰지 않는다(curl_cffi 때문에 설치 불가).
+            install "pandas"
+            install "numpy"
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.work:work-runtime:2.9.1'
+}
