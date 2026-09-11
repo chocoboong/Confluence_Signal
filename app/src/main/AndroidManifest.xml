@@ -28,6 +28,17 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <!-- 스캔이 도는 동안 안드로이드가 앱을 죽이지 못하게 전경 서비스로 올린다.
              Android 14 부터는 종류(dataSync)를 반드시 밝혀야 한다. -->
         <service

@@ -27,6 +27,7 @@ class ScanWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
             nm.createNotificationChannel(
                 NotificationChannel(CH_MSG, "실행 결과", NotificationManager.IMPORTANCE_DEFAULT)
             )
+            StatusNote.ensureChannel(c)
         }
     }
 
@@ -34,6 +35,7 @@ class ScanWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
         val c = applicationContext
         ensureChannels(c)
 
+        StatusNote.refresh(c)
         val (should, why) = Scheduler.shouldRunNow(c)
         if (!should) return Result.success()
 
@@ -63,8 +65,10 @@ class ScanWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
             Prefs.put(c, Prefs.K_LAST_SUM, "${Scheduler.todayKst()} $summary")
             if (ok) {
                 Prefs.put(c, Prefs.K_LAST_OK, Scheduler.todayKst())
+                StatusNote.refresh(c)
                 Result.success()
             } else {
+                StatusNote.refresh(c)
                 notify(c, "합류신호 알림 - 실패", summary.take(180))
                 Result.retry()
             }

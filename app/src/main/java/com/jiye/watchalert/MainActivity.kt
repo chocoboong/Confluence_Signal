@@ -109,6 +109,7 @@ class MainActivity : AppCompatActivity() {
             .map { it.trim() }.count { it.isNotEmpty() }
 
     private fun showStatus() {
+        StatusNote.refresh(this)
         val last = Prefs.getStr(this, Prefs.K_LAST_SUM, "아직 실행한 적 없음")
         val auto = if (Prefs.getBool(this, Prefs.K_AUTO, false)) "켜짐" else "꺼짐"
         val (_, why) = Scheduler.shouldRunNow(this)
