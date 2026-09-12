@@ -56,6 +56,9 @@ class MainActivity : AppCompatActivity() {
 
         load()
         askNotificationPermission()
+        // 앱을 열 때마다 예약을 다시 등록한다. 앱을 새로 깔았거나 알람이
+        // 어떤 이유로 사라졌어도 여기서 복구된다.
+        if (Prefs.getBool(this, Prefs.K_AUTO, false)) Scheduler.enable(this)
 
         findViewById<Button>(R.id.btnSave).setOnClickListener {
             save()

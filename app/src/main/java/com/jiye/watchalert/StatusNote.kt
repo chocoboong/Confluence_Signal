@@ -56,7 +56,10 @@ object StatusNote {
         else "마지막 확인 $lastOk"
 
         val (_, why) = Scheduler.shouldRunNow(c)
-        val detail = "$lastLine · $why"
+        val next = java.text.SimpleDateFormat("M/d HH:mm", java.util.Locale.KOREA)
+        next.timeZone = Scheduler.KST
+        val nextText = next.format(java.util.Date(DailyAlarm.nextTriggerMillis()))
+        val detail = "$lastLine · $why\n다음 예정 $nextText"
 
         val open = PendingIntent.getActivity(
             c, 0,

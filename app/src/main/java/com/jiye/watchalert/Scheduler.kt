@@ -21,6 +21,9 @@ object Scheduler {
     private const val WORK = "watchalert-periodic"
     val KST: TimeZone = TimeZone.getTimeZone("Asia/Seoul")
 
+    /** 하루 한 번 확실히 치는 시각(한국시간). 미국장 마감은 새벽 5~6시다. */
+    const val RUN_HOUR = 7
+
     fun enable(c: Context) {
         val req = PeriodicWorkRequest.Builder(ScanWorker::class.java, 4, TimeUnit.HOURS)
             .setConstraints(
@@ -32,10 +35,13 @@ object Scheduler {
         WorkManager.getInstance(c).enqueueUniquePeriodicWork(
             WORK, ExistingPeriodicWorkPolicy.UPDATE, req
         )
+        // 위는 '놓치지 않기 위한' 그물, 아래는 '제때 치기 위한' 알람.
+        DailyAlarm.schedule(c)
     }
 
     fun disable(c: Context) {
         WorkManager.getInstance(c).cancelUniqueWork(WORK)
+        DailyAlarm.cancel(c)
     }
 
     fun todayKst(): String {
@@ -57,7 +63,7 @@ object Scheduler {
         val cal = Calendar.getInstance(KST)
         val hour = cal.get(Calendar.HOUR_OF_DAY)
         val dow = cal.get(Calendar.DAY_OF_WEEK)   // 1=일 ... 7=토
-        if (hour < 7) return false to "아직 07시 전"
+        if (hour < RUN_HOUR) return false to ("아직 " + RUN_HOUR + "시 전")
         if (dow == Calendar.SUNDAY || dow == Calendar.MONDAY)
             return false to "일·월은 새로 닫힌 미국장이 없음"
         if (Prefs.getStr(c, Prefs.K_LAST_OK) == todayKst())
