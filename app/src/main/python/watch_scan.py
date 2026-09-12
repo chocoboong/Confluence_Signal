@@ -37,6 +37,7 @@ CONF_FILE = os.path.join(HERE, '텔레그램설정.txt')
 LOG = os.path.join(HERE, '알림로그.csv')
 REPORT = os.path.join(HERE, '관찰리포트.md')
 BASEFILE = os.path.join(HERE, '_알림기준일.txt')
+DELAYFILE = os.path.join(DATADIR, '_야후지연.json')
 UNIVERSE_DIR = os.path.join(HERE, '..', '주가데이터')
 
 STALE_DAYS = 5
@@ -244,6 +245,33 @@ def fill_results(log, df):
     return log
 
 
+def delay_note():
+    """야후가 최근 봉을 아직 안 준 상태면 그 사실을 한 줄로 돌려준다.
+
+    이게 없으면 옛 데이터로 조용히 '신호 없음' 을 보내게 된다. 사람이 PC 와
+    대조해 보지 않는 한 알아챌 방법이 없어서, 메시지에 직접 띄운다.
+    """
+    try:
+        if not os.path.exists(DELAYFILE):
+            return ''
+        with open(DELAYFILE, encoding='utf-8') as f:
+            d = json.load(f)
+    except Exception:
+        return ''
+    w = d.get('관찰') or {}
+    syn = str(w.get('합성', ''))
+    if syn:
+        return ('[안내] %s 봉이 야후 일봉에 아직 없어 마감 요약값으로 채웠습니다. '
+                '종가는 정확하지만 시가·고가·저가는 아닙니다(판정에는 종가만 씁니다). '
+                '진짜 봉이 들어오면 다음 실행에서 자동 교체됩니다.' % syn)
+    exp, have = str(w.get('기대', '')), str(w.get('실제', ''))
+    if not exp or not have or exp <= have:
+        return ''
+    return ('[주의] %s 장은 닫혔는데 야후가 그 봉을 아직 주지 않았습니다. '
+            '아래 판정은 %s 종가까지만 반영한 것입니다. '
+            '봉이 채워지면 다음 실행에서 소급해 다시 봅니다.' % (exp, have))
+
+
 def build_message(rows, g, last, age, quiet, notes, maxn):
     stress = int(g['스트레스']) if pd.notna(g['스트레스']) else -1
     head = []
@@ -427,9 +455,14 @@ def main():
                      '다음 실행부터 새로 나온 신호만 옵니다.'
                      % (basedate.date(), int((log['발송'] == '초기기록').sum()) if len(log) else 0))
 
+    dn = delay_note()
+    if dn:
+        notes.append(dn)
+        print(dn)
+
     quiet = conf['조용한날도알림']
     msg = build_message(to_send, g, last, age, quiet, notes, conf['한번에최대'])
-    if len(to_send) or quiet or first_run:
+    if len(to_send) or quiet or first_run or dn:
         if dry:
             print('--- (dry) 보냈을 메시지 ---')
             print(msg)

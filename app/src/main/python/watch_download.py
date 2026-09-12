@@ -41,6 +41,7 @@ MAX_SINGLE = 50           # 단건 재시도(Ticker.history)를 시도할 최대
 GIVEUP_AFTER = 3          # 같은 날짜를 이만큼 실패하면 포기한다. 야후가 끝내 안 주는 봉을
                           # 매일 50번씩 다시 요청하면 정작 필요한 다운로드가 차단당한다.
 GIVEUP_FILE = '_포기한날짜.json'
+DELAY_FILE = '_야후지연.json'   # 야후가 최근 봉을 아직 안 준 상태를 기록
 DEFAULT_INDEX = ['RSP']
 
 COLS = ['Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
@@ -310,6 +311,11 @@ def run_group(label, tickers, path, ref_dates=None):
               % (len(left), ', '.join(days[:5])))
         print('         야후가 아직 그 봉을 주지 않는 것일 수 있습니다. 다음 실행 때 다시 시도합니다.')
 
+    # ★ 야후가 '가장 최근에 닫힌 장'의 봉을 아직 안 준 경우를 잡는다.
+    #   모든 종목이 같은 날을 빠뜨리면 find_holes 는 기준이 될 종목이 없어 못 본다.
+    #   그래서 야후가 스스로 알려주는 마지막 장 날짜와 직접 대조한다.
+    df = _check_lagging(df, label, tickers, end)
+
     os.makedirs(DATADIR, exist_ok=True)
     df.to_csv(path, index=False)
     print('  저장 %s' % path)
@@ -318,6 +324,74 @@ def run_group(label, tickers, path, ref_dates=None):
     missing = [t for t in tickers if t not in set(df['Ticker'])]
     if missing:
         print('  [주의] 끝내 못 받은 종목: %s (티커 철자를 확인하세요)' % ', '.join(missing))
+
+
+def _delay_path():
+    return os.path.join(DATADIR, DELAY_FILE)
+
+
+def load_delay():
+    try:
+        with open(_delay_path(), encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_delay(d):
+    try:
+        os.makedirs(DATADIR, exist_ok=True)
+        with open(_delay_path(), 'w', encoding='utf-8') as f:
+            json.dump(d, f, ensure_ascii=False, indent=1, sort_keys=True)
+    except Exception:
+        pass
+
+
+def _check_lagging(df, label, tickers, end):
+    """받아온 마지막 봉이 야후가 말하는 마지막 장보다 뒤처졌는지 본다.
+
+    뒤처졌으면 한 번 더 받아 보고, 그래도 안 채워지면 기록해 둔다.
+    (watch_scan 이 그 기록을 읽어 알림 메시지에 경고를 붙인다.)
+    """
+    import yahoo
+    d = load_delay()
+    have = str(df['Date'].max()) if not df.empty else ''
+    sess = str(getattr(yahoo, 'LAST_SESSION', '') or '')
+    synth = list(getattr(yahoo, 'SYNTH', []) or [])
+
+    if not sess or not have or sess <= have:
+        if synth:
+            # 마지막 봉을 meta 요약값으로 채워서 따라잡은 경우
+            print('  [보정] %s 봉이 야후 일봉에 없어 마감 요약값으로 채웠습니다 (%d종목).'
+                  % (sess, len(synth)))
+            print('         시가·고가·저가는 정확하지 않습니다. 종가만 씁니다.')
+            print('         다음 실행에서 진짜 봉이 들어오면 자동으로 교체됩니다.')
+            d[label] = {'합성': sess, '종목수': len(synth)}
+        else:
+            d.pop(label, None)
+        save_delay(d)
+        return df
+
+    print('  [주의] 야후가 %s 장의 봉을 아직 주지 않았습니다 (지금 마지막 %s).'
+          % (sess, have))
+    print('         30초 뒤 한 번 더 받아 봅니다.')
+    time.sleep(30)
+    start = (pd.Timestamp(have) - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
+    again = _fetch_chunked('재시도', tickers, start, end)
+    if not again.empty:
+        merged = tidy(pd.concat([df, again], ignore_index=True))
+        new_have = str(merged['Date'].max())
+        if new_have > have:
+            print('  [해결] %s 봉이 들어왔습니다.' % new_have)
+            d.pop(label, None)
+            save_delay(d)
+            return merged
+        df = merged
+
+    print('  [미해결] %s 봉은 여전히 없습니다. 다음 실행에서 다시 시도합니다.' % sess)
+    d[label] = {'기대': sess, '실제': have}
+    save_delay(d)
+    return df
 
 
 def main():

@@ -35,6 +35,55 @@ class YahooError(Exception):
     pass
 
 
+# 야후가 알려주는 '가장 최근에 닫힌 장'의 날짜(거래소 현지 기준).
+# 응답의 meta.regularMarketTime 에서 뽑는다. 받아온 봉의 마지막 날짜가 이보다
+# 뒤처져 있으면, 장은 닫혔는데 야후가 그 봉을 아직 안 채운 것이다.
+# 이 경우 조용히 옛 데이터로 판정하면 안 되므로 밖에서 볼 수 있게 남긴다.
+LAST_SESSION = ''
+
+# 야후가 마지막 봉을 안 줬을 때 meta 의 요약값으로 그 봉을 채울지.
+# 끄려면 False. 채운 종목은 SYNTH 에 쌓인다.
+SYNTH_LAST_BAR = True
+SYNTH = []
+
+SETTLE_SEC = 1200      # 마감 뒤 이만큼(20분) 지나야 확정으로 본다
+CLOSE_MIN = 15 * 60 + 55   # 거래소 현지 15:55 이후의 체결이어야 '종가'로 본다
+
+
+def _note_session(d):
+    global LAST_SESSION
+    if d and d > LAST_SESSION:
+        LAST_SESSION = d
+
+
+def _session_closed(meta, rmt, off):
+    """rmt(마지막 정규장 체결 시각)가 정말 '그날 장이 끝난 뒤'의 값인가.
+
+    장중에 부르면 rmt 는 계속 갱신되는 미확정 가격이다. 그걸로 봉을 만들면
+    가짜 종가가 들어간다. 그래서 두 가지로 확인한다.
+      ① 야후가 알려주는 정규장 종료시각(currentTradingPeriod.regular.end)에
+         도달한 체결이고, 그 뒤로 20분이 더 지났다
+      ② 위 정보가 없으면, 거래소 현지 15:55 이후의 체결이고 20분이 지났다
+    반가(半場) 폐장일은 13:00 에 끝나므로 ②에 걸린다. 그런 날은 합성하지 않고
+    그냥 다음 실행을 기다린다 — 틀린 값을 넣는 것보다 늦는 편이 낫다.
+    """
+    now = time.time()
+    try:
+        cp = (meta.get('currentTradingPeriod') or {}).get('regular') or {}
+        end = cp.get('end')
+        if end and rmt >= int(end) - 120 and now >= int(end) + SETTLE_SEC:
+            return True
+    except Exception:
+        pass
+    try:
+        lt = datetime.datetime.utcfromtimestamp(rmt + off)
+        if (lt.hour * 60 + lt.minute) >= CLOSE_MIN and now >= rmt + SETTLE_SEC:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _to_epoch(d):
     """'2021-01-01' / date / Timestamp 를 UTC 자정 기준 유닉스 초로."""
     ts = pd.Timestamp(d)
@@ -98,7 +147,18 @@ def chart(ticker, start, end):
     q = (ind.get('quote') or [{}])[0]
     adj = (ind.get('adjclose') or [{}])[0].get('adjclose')
 
-    off = int((r.get('meta') or {}).get('gmtoffset') or 0)
+    meta = r.get('meta') or {}
+    off = int(meta.get('gmtoffset') or 0)
+
+    # 이 종목이 마지막으로 거래된 장의 날짜
+    rmt = meta.get('regularMarketTime')
+    if rmt:
+        rmt = int(rmt)
+        try:
+            _note_session(datetime.datetime.utcfromtimestamp(int(rmt) + off)
+                          .date().strftime('%Y-%m-%d'))
+        except Exception:
+            pass
 
     o, h, l, c = (q.get('open'), q.get('high'), q.get('low'), q.get('close'))
     v = q.get('volume')
@@ -125,6 +185,28 @@ def chart(ticker, start, end):
                      pick(v, i)))
     if not rows:
         return pd.DataFrame(columns=COLS)
+
+    # ★ 야후가 마지막 장의 봉을 비워 둔 경우, meta 의 요약값으로 그 봉을 만든다.
+    #   장이 확실히 끝난 뒤에만 한다(_session_closed).
+    if SYNTH_LAST_BAR and rmt and rows:
+        try:
+            sess = datetime.datetime.utcfromtimestamp(int(rmt) + off).date().strftime('%Y-%m-%d')
+            price = meta.get('regularMarketPrice')
+            if (sess > rows[-1][1] and price is not None and float(price) > 0
+                    and _session_closed(meta, int(rmt), off)):
+                hi = meta.get('regularMarketDayHigh')
+                lo = meta.get('regularMarketDayLow')
+                vol = meta.get('regularMarketVolume')
+                rows.append((str(ticker), sess,
+                             float(price),                      # 시가는 알 수 없어 종가로 둔다
+                             float(hi) if hi else float(price),
+                             float(lo) if lo else float(price),
+                             float(price),
+                             float(price),                      # 수정종가 = 종가 (배당 미반영)
+                             int(vol) if vol else 1))
+                SYNTH.append('%s %s' % (ticker, sess))
+        except Exception:
+            pass
 
     df = pd.DataFrame(rows, columns=COLS)
     # 같은 날짜가 두 번 오는 경우(드묾) 뒤엣것을 남긴다.
